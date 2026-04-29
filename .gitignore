@@ -1,0 +1,48 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.env/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- Secrets (never commit) ---
+.env
+.env.*
+!.env.example
+
+# --- Backend: local vector DB & indexes (regenerated on run) ---
+backend/chroma_db/
+backend/chroma_runs/
+
+# --- Backend: uploaded / local documents ---
+# Remove these lines if you want to version sample PDFs/PPTX in git.
+backend/data/*
+!backend/data/.gitkeep
+
+# --- Frontend (Vite / Node) ---
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+
+# --- Logs & OS ---
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Editors ---
+.idea/
+*.swp
+*.swo
