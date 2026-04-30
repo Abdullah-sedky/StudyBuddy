@@ -23,12 +23,32 @@ llm = ChatGroq(model_name="llama-3.3-70b-versatile")
 
 system_prompt = """
     You are a helpful university tutor.
-    
-    1. Try to answer the user's question using ONLY the provided Context. 
+
+    1. Try to answer the user's question using ONLY the provided Context.
     2. If the answer is not in the Context, you may use your general knowledge, but you MUST start your answer by saying: 'Note: I am answering this based on general knowledge.'
-    3. At the end of every response, create a 'Resources' section. 
+    3. At the end of every response, create a 'Resources' section.
        - If you used the Context, list the document names (metadata source).
        - If you used general knowledge, list the specific external concepts or standard references you relied on.
+
+    DIAGRAMS
+    --------
+    When the user asks you to explain something visually, draw a diagram, or show how something works,
+    respond with a Mermaid diagram inside a fenced code block, like this:
+
+    ```mermaid
+    flowchart TD
+        A[Start] --> B[Step]
+        B --> C[End]
+    ```
+
+    Use the most appropriate diagram type for the concept:
+    - flowchart TD / LR  — for processes, pipelines, algorithms
+    - sequenceDiagram    — for interactions between components or actors
+    - classDiagram       — for object relationships or data structures
+    - mindmap            — for concept overviews and topic breakdowns
+
+    Keep diagrams concise (under 20 nodes). You may combine a short text explanation with the diagram.
+    Always use valid Mermaid syntax — avoid special characters inside node labels.
 
     Context: {context}
 """
@@ -61,20 +81,91 @@ def _iter_shapes(shapes):
             yield from _iter_shapes(shape.shapes)
 
 
-def _text_from_slide(slide) -> list[str]:
-    """Extract visible text from a slide (text boxes + tables, including groups)."""
+def _safe_text(v) -> str:
+    return (v or "").strip()
+
+
+def _chart_to_lines(shape) -> list[str]:
     lines: list[str] = []
+    chart = getattr(shape, "chart", None)
+    if chart is None:
+        return lines
+
+    chart_title = ""
+    try:
+        if chart.has_title and chart.chart_title and chart.chart_title.text_frame:
+            chart_title = _safe_text(chart.chart_title.text_frame.text)
+    except Exception:
+        chart_title = ""
+
+    if chart_title:
+        lines.append(f"Chart title: {chart_title}")
+    else:
+        lines.append("Chart present")
+
+    try:
+        categories = []
+        if chart.plots and chart.plots[0].categories:
+            categories = [_safe_text(c.label) for c in chart.plots[0].categories]
+        for series in chart.series:
+            values = []
+            for idx, point in enumerate(series.points):
+                cat = categories[idx] if idx < len(categories) else f"item-{idx + 1}"
+                values.append(f"{cat}={point.value}")
+            if values:
+                lines.append(f"Series '{series.name}': " + ", ".join(values))
+    except Exception:
+        lines.append("Chart data could not be fully read.")
+
+    return lines
+
+
+def _picture_to_lines(shape) -> list[str]:
+    lines: list[str] = []
+    name = _safe_text(getattr(shape, "name", ""))
+    alt_text = _safe_text(getattr(shape, "alternative_text", ""))
+    if name or alt_text:
+        lines.append(
+            "Image: "
+            + ", ".join(
+                [part for part in [f"name={name}" if name else "", f"description={alt_text}" if alt_text else ""] if part]
+            )
+        )
+    else:
+        lines.append("Image present")
+    return lines
+
+
+def _text_from_slide(slide) -> list[str]:
+    """Extract text and structured hints from a slide, including charts/images."""
+    lines: list[str] = []
+
+    notes_text = ""
+    try:
+        if slide.has_notes_slide and slide.notes_slide and slide.notes_slide.notes_text_frame:
+            notes_text = _safe_text(slide.notes_slide.notes_text_frame.text)
+    except Exception:
+        notes_text = ""
+    if notes_text:
+        lines.append(f"Speaker notes: {notes_text}")
+
     for shape in _iter_shapes(slide.shapes):
         if getattr(shape, "has_table", False):
             for row in shape.table.rows:
                 for cell in row.cells:
-                    t = (cell.text or "").strip()
+                    t = _safe_text(cell.text)
                     if t:
                         lines.append(t)
             continue
+        if getattr(shape, "has_chart", False):
+            lines.extend(_chart_to_lines(shape))
+            continue
+        if getattr(shape, "image", None) is not None:
+            lines.extend(_picture_to_lines(shape))
+            continue
         if getattr(shape, "has_text_frame", False):
             for para in shape.text_frame.paragraphs:
-                t = (para.text or "").strip()
+                t = _safe_text(para.text)
                 if t:
                     lines.append(t)
     return lines
@@ -206,6 +297,7 @@ def create_study_brain(data_path="./data", persist_dir="./chroma_db"):
     )
 
     return current_vectorstore.as_retriever(search_kwargs={"k": 8})
+
 # ---------- Chain Builder ----------
 
 def build_chain(retriever):

@@ -1,6 +1,122 @@
 import React, { useState, useEffect, useRef } from "react";
+import mermaid from "mermaid";
 
-const API = "http://127.0.0.1:8000";
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "neutral",
+  themeVariables: {
+    fontFamily: "Nunito, sans-serif",
+    fontSize: "13px",
+    primaryColor: "#e8e1d6",
+    primaryTextColor: "#2e271f",
+    primaryBorderColor: "#d9d0c3",
+    lineColor: "#a89880",
+    secondaryColor: "#f2ede4",
+    tertiaryColor: "#faf8f4",
+  },
+});
+
+// In local dev default to Vite proxy (/api -> backend on :8000).
+// In production (same-origin deploy), this resolves to "" unless overridden.
+const API = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "/api" : "");
+
+// ── Mermaid diagram block ──────────────────────────────────────────────────
+
+function MermaidBlock({ code, onZoom }) {
+  const containerRef = useRef(null);
+  const [error, setError]     = useState(null);
+  const [rendered, setRendered] = useState(false);
+  const [svgContent, setSvgContent] = useState("");
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const id = `mermaid-${Math.random().toString(36).slice(2, 9)}`;
+    mermaid
+      .render(id, code)
+      .then(({ svg }) => {
+        if (containerRef.current) {
+          containerRef.current.innerHTML = svg;
+          setSvgContent(svg);
+          setRendered(true);
+        }
+      })
+      .catch(() => setError(true));
+  }, [code]);
+
+  if (error) {
+    return (
+      <pre className="text-xs text-sand-500 bg-sand-100 border border-sand-300 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">
+        {code}
+      </pre>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      role="button"
+      tabIndex={0}
+      onClick={() => svgContent && onZoom?.(svgContent)}
+      onKeyDown={(e) => {
+        if ((e.key === "Enter" || e.key === " ") && svgContent) {
+          e.preventDefault();
+          onZoom?.(svgContent);
+        }
+      }}
+      className={`
+        my-2 rounded-xl border border-sand-200 bg-sand-50 p-4
+        flex items-center justify-center overflow-x-auto cursor-zoom-in
+        focus:outline-none focus:ring-2 focus:ring-sand-400
+        transition-opacity duration-300
+        ${rendered ? "opacity-100" : "opacity-0"}
+      `}
+      title="Click to zoom"
+    />
+  );
+}
+
+// ── Message content parser ─────────────────────────────────────────────────
+// Splits a message string into alternating text / mermaid segments
+
+function parseContent(content) {
+  const parts  = [];
+  const regex  = /```mermaid\n([\s\S]*?)```/g;
+  let last     = 0;
+  let match;
+
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > last) {
+      parts.push({ type: "text", content: content.slice(last, match.index) });
+    }
+    parts.push({ type: "mermaid", content: match[1].trim() });
+    last = match.index + match[0].length;
+  }
+
+  if (last < content.length) {
+    parts.push({ type: "text", content: content.slice(last) });
+  }
+
+  return parts.length > 0 ? parts : [{ type: "text", content }];
+}
+
+function MessageContent({ content, onZoomDiagram }) {
+  const parts = parseContent(content);
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.type === "mermaid" ? (
+          <MermaidBlock key={i} code={part.content} onZoom={onZoomDiagram} />
+        ) : (
+          <span key={i} className="whitespace-pre-wrap">
+            {part.content.replace(/\*\*(.*?)\*\*/g, "$1")}
+          </span>
+        )
+      )}
+    </>
+  );
+}
+
+// ── Icons ──────────────────────────────────────────────────────────────────
 
 function FileIcon() {
   return (
@@ -26,6 +142,8 @@ function UploadIcon() {
   );
 }
 
+// ── App ────────────────────────────────────────────────────────────────────
+
 export default function App() {
   const [sessionId, setSessionId]         = useState(null);
   const [messages, setMessages]           = useState([]);
@@ -34,7 +152,8 @@ export default function App() {
   const [uploading, setUploading]         = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [dragOver, setDragOver]           = useState(false);
-  const bottomRef   = useRef(null);
+  const [zoomedDiagramSvg, setZoomedDiagramSvg] = useState("");
+  const bottomRef    = useRef(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -47,6 +166,15 @@ export default function App() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (!zoomedDiagramSvg) return;
+    const onEsc = (e) => {
+      if (e.key === "Escape") setZoomedDiagramSvg("");
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [zoomedDiagramSvg]);
 
   const uploadFile = async (file) => {
     if (!file) return;
@@ -62,20 +190,20 @@ export default function App() {
     formData.append("file", file);
 
     try {
-      const res  = await fetch(`${API}/upload`, { method: "POST", body: formData });
-      const data = await res.json();
+      const res = await fetch(`${API}/upload`, { method: "POST", body: formData });
+      let data = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = {};
+      }
       if (res.ok) {
         const sizeKb = (file.size / 1024).toFixed(1);
         const size   = sizeKb > 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb} KB`;
         const time   = new Date().toLocaleString("en-US", {
           month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
         });
-        setUploadedFiles(prev => [...prev, {
-          name: file.name,
-          size,
-          type: ext.toUpperCase(),
-          time,
-        }]);
+        setUploadedFiles(prev => [...prev, { name: file.name, size, type: ext.toUpperCase(), time }]);
         setMessages(prev => [...prev, {
           role: "assistant",
           content: `**${file.name}** has been indexed and is ready to use.`,
@@ -83,7 +211,7 @@ export default function App() {
       } else {
         setMessages(prev => [...prev, {
           role: "assistant",
-          content: `Upload failed: ${data.detail}`,
+          content: `Upload failed: ${data.detail || `HTTP ${res.status}`}`,
         }]);
       }
     } catch {
@@ -239,9 +367,16 @@ export default function App() {
           )}
         </div>
 
-        {/* Clear chat */}
-        <div className="px-4 pb-5 pt-3">
+        {/* Diagram hint */}
+        <div className="px-4 pb-2 pt-3">
           <div className="border-t border-sand-300 mb-3" />
+          <p className="text-[10px] text-sand-400 leading-relaxed text-center">
+            💡 Try: <span className="italic">"Draw a diagram of..."</span>
+          </p>
+        </div>
+
+        {/* Clear chat */}
+        <div className="px-4 pb-5 pt-2">
           <button
             onClick={clearChat}
             className="w-full text-xs font-medium text-sand-600 bg-sand-50 hover:bg-sand-100 border border-sand-300 hover:border-sand-400 rounded-xl py-2.5 transition-all duration-150"
@@ -277,13 +412,16 @@ export default function App() {
             <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
               <div
                 className={`
-                  max-w-[68%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap
+                  max-w-[68%] rounded-2xl px-4 py-3 text-sm leading-relaxed
                   ${msg.role === "user"
                     ? "bg-sand-700 text-sand-50 rounded-br-sm"
                     : "bg-white border border-sand-200 text-sand-800 rounded-bl-sm shadow-sm"}
                 `}
               >
-                {msg.content.replace(/\*\*(.*?)\*\*/g, "$1")}
+                <MessageContent
+                  content={msg.content}
+                  onZoomDiagram={setZoomedDiagramSvg}
+                />
               </div>
             </div>
           ))}
@@ -328,6 +466,29 @@ export default function App() {
           </p>
         </div>
       </main>
+
+      {zoomedDiagramSvg && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 p-4 md:p-8"
+          onClick={() => setZoomedDiagramSvg("")}
+        >
+          <div
+            className="relative h-full w-full rounded-xl bg-white shadow-2xl overflow-auto p-4 md:p-8"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setZoomedDiagramSvg("")}
+              className="sticky top-0 ml-auto block rounded-lg border border-sand-300 bg-sand-50 px-3 py-1.5 text-xs font-medium text-sand-700 hover:bg-sand-100"
+            >
+              Close
+            </button>
+            <div
+              className="mt-3 min-h-[70vh] flex items-start justify-center"
+              dangerouslySetInnerHTML={{ __html: zoomedDiagramSvg }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
