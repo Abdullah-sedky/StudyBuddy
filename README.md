@@ -1,8 +1,15 @@
 # StudyBuddy
 
-StudyBuddy is a document-based study assistant that lets you upload course files (`.pdf`, `.pptx`) and ask questions in chat using Retrieval-Augmented Generation (RAG).
+StudyBuddy is a document-based study assistant that lets you upload course files (`.pdf`, `.pptx`), chat with your material using Retrieval-Augmented Generation (RAG), and generate interactive practice assessments.
 
 It combines a FastAPI backend, a React frontend, local vector search with ChromaDB, and Groq-hosted LLM inference.
+
+## Live Deployment
+
+- **Backend (Railway):** `https://<your-backend-domain>.up.railway.app`
+- **Frontend (Vercel):** `https://<your-frontend-domain>.vercel.app`
+
+> Replace the placeholders above with your real deployed URLs.
 
 ## Features
 
@@ -11,6 +18,11 @@ It combines a FastAPI backend, a React frontend, local vector search with Chroma
 - Session-based chat history for follow-up questions.
 - Mermaid diagram rendering in chat responses.
 - Click-to-zoom Mermaid diagrams in the UI.
+- Interactive assessment generation:
+  - `MCQ Quiz` mode
+  - `Model Exam` mode
+  - selectable answer options
+  - instant scoring and explanations after submission
 - PPTX extraction includes:
   - text boxes and tables
   - speaker notes
@@ -47,6 +59,13 @@ StudyBuddy/
 4. User asks a question in chat.
 5. Retriever fetches relevant chunks.
 6. LLM answers using retrieved context and conversation history.
+
+For assessments:
+
+1. User clicks `MCQ Quiz` or `Model Exam`.
+2. Backend retrieves relevant context from indexed documents.
+3. LLM returns structured multiple-choice questions.
+4. Frontend renders an interactive quiz interface (select, submit, score, explain).
 
 ## Local Setup
 
@@ -95,21 +114,47 @@ Open the app at `http://127.0.0.1:5173`.
 - `GET /session` -> create new chat session id
 - `POST /upload` -> upload and index one file (`multipart/form-data`)
 - `POST /ask` -> ask a question with `session_id`
+- `POST /assessment` -> generate structured MCQ/model-exam content from indexed context
 
 ## Notes and Limitations
 
 - Best results come from text-rich files.
 - Visual-heavy slides (complex diagrams/photos) are only partially understood without a dedicated vision pipeline.
 - Upload currently rebuilds the index from files in the data directory.
-- Files are persisted locally; no auth/multi-user isolation yet.
+- No authentication / per-user isolation yet.
+- On free-tier hosting, storage may be ephemeral (uploaded files/index may reset after redeploy/restart).
 
-## Deployment
+## Deployment (Railway + Vercel)
 
-- `railway.toml` is included for Railway deployment flow.
-- For production, configure:
-  - frontend/base URL behavior
-  - backend CORS origins
-  - environment variables (e.g., `GROQ_API_KEY`)
+### Backend (Railway)
+
+1. Create a Railway service from this repo.
+2. Ensure `railway.toml` is used.
+3. Add Railway variable:
+   - `GROQ_API_KEY=your_key_here`
+4. Generate a public domain in Railway networking.
+
+### Frontend (Vercel)
+
+1. Import the same repo in Vercel.
+2. Set **Root Directory** to `frontend`.
+3. Add Vercel environment variable:
+   - `VITE_API_URL=https://<your-backend-domain>.up.railway.app`
+4. Deploy.
+
+### CORS
+
+In `backend/main.py`, add your Vercel domain to `ALLOWED_ORIGINS`, then redeploy backend.
+
+Example:
+
+```python
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://<your-frontend-domain>.vercel.app",
+]
+```
 
 ## Roadmap Ideas
 
