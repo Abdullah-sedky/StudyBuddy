@@ -5,7 +5,7 @@ import shutil
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from rag import build_chain, create_study_brain, release_study_brain
+from rag import build_chain, create_study_brain, release_study_brain, generate_assessment
 
 app = FastAPI()
 
@@ -90,10 +90,12 @@ _prune_stale_chroma_runs(_persist if os.path.isdir(_persist) and os.listdir(_per
 
 try:
     print("Loading existing vector store on startup...")
-    chain = build_chain(create_study_brain("./data", persist_dir=_persist))
+    retriever = create_study_brain("./data", persist_dir=_persist)
+    chain = build_chain(retriever)
     print("Chain ready.")
 except ValueError:
     print("No documents found on startup. Waiting for upload.")
+    retriever = None
     chain = None
 
 # ---------- Request Models ----------
@@ -105,6 +107,13 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     answer: str
     session_id: str
+
+
+class AssessmentRequest(BaseModel):
+    session_id: str
+    kind: str = "mcq"
+    num_questions: int = 8
+    topic: str = ""
 
 # ---------- Endpoints ----------
 
@@ -132,7 +141,7 @@ async def ask(request: AskRequest):
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    global chain
+    global chain, retriever
 
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in [".pdf", ".pptx"]:
@@ -149,10 +158,34 @@ async def upload_file(file: UploadFile = File(...)):
 
     new_persist = _persist_dir_for_new_index()
     try:
-        new_retriever = create_study_brain("./data", persist_dir=new_persist)
-        chain = build_chain(new_retriever)
+        retriever = create_study_brain("./data", persist_dir=new_persist)
+        chain = build_chain(retriever)
         _write_active_persist_dir(new_persist)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process file: {str(e)}")
 
     return {"message": f"{file.filename} uploaded and indexed successfully."}
+
+
+@app.post("/assessment")
+async def create_assessment(request: AssessmentRequest):
+    if chain is None or retriever is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No documents uploaded yet. Please upload a file first."
+        )
+    kind = request.kind.lower().strip()
+    if kind not in ["mcq", "exam"]:
+        raise HTTPException(status_code=400, detail="kind must be 'mcq' or 'exam'")
+
+    try:
+        payload = generate_assessment(
+            retriever,
+            assessment_type=kind,
+            num_questions=request.num_questions,
+            topic=request.topic,
+        )
+        payload["session_id"] = request.session_id
+        return payload
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate assessment: {str(e)}")

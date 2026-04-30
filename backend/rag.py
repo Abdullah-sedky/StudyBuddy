@@ -1,5 +1,6 @@
 import glob
 import os
+import json
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_community.document_loaders import (
@@ -314,3 +315,113 @@ def build_chain(retriever):
         input_messages_key="input",
         history_messages_key="chat_history",
     )
+
+
+def _context_from_docs(docs: list[Document], max_chars: int = 12000) -> str:
+    chunks: list[str] = []
+    total = 0
+    for d in docs:
+        source = str(d.metadata.get("source", "unknown"))
+        text = (d.page_content or "").strip()
+        if not text:
+            continue
+        piece = f"Source: {source}\n{text}\n"
+        if total + len(piece) > max_chars:
+            remaining = max_chars - total
+            if remaining > 200:
+                piece = piece[:remaining]
+                chunks.append(piece)
+            break
+        chunks.append(piece)
+        total += len(piece)
+    return "\n---\n".join(chunks)
+
+
+def generate_assessment(
+    retriever,
+    *,
+    assessment_type: str,
+    num_questions: int = 8,
+    topic: str = "",
+) -> dict:
+    q_count = max(3, min(num_questions, 20))
+    kind = "model exam" if assessment_type == "exam" else "mcq quiz"
+    retrieval_query = (
+        f"Create a {kind} about: {topic}" if topic else f"Create a {kind} from uploaded course material"
+    )
+    docs = retriever.invoke(retrieval_query)
+    context = _context_from_docs(docs)
+    if not context:
+        raise ValueError("No indexed context available to generate assessment.")
+
+    prompt = f"""
+You are generating an interactive {kind} for a university student.
+Use ONLY the provided context.
+
+Return STRICT JSON only (no markdown fences, no extra text) with this shape:
+{{
+  "title": "string",
+  "type": "{assessment_type}",
+  "questions": [
+    {{
+      "question": "string",
+      "options": ["string", "string", "string", "string"],
+      "correct_index": 0,
+      "explanation": "string"
+    }}
+  ]
+}}
+
+Rules:
+- Exactly {q_count} questions.
+- Exactly 4 options per question.
+- correct_index must be an integer from 0 to 3.
+- Questions must be clear and unambiguous.
+- Keep options realistic and not obviously wrong.
+- For exam mode: increase difficulty and include conceptual + applied questions.
+- Do not include any text outside JSON.
+
+Context:
+{context}
+"""
+
+    response = llm.invoke(prompt)
+    content = (getattr(response, "content", "") or "").strip()
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        start = content.find("{")
+        end = content.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError("Model output was not valid JSON.")
+        payload = json.loads(content[start : end + 1])
+
+    questions = payload.get("questions", [])
+    if not isinstance(questions, list) or not questions:
+        raise ValueError("Assessment generation returned no questions.")
+
+    normalized = []
+    for q in questions[:q_count]:
+        options = q.get("options", [])
+        if not isinstance(options, list) or len(options) < 4:
+            continue
+        correct_index = q.get("correct_index", 0)
+        if not isinstance(correct_index, int) or correct_index < 0 or correct_index > 3:
+            correct_index = 0
+        normalized.append(
+            {
+                "question": str(q.get("question", "")).strip(),
+                "options": [str(o).strip() for o in options[:4]],
+                "correct_index": correct_index,
+                "explanation": str(q.get("explanation", "")).strip(),
+            }
+        )
+
+    if len(normalized) < 3:
+        raise ValueError("Assessment generation failed quality checks.")
+
+    return {
+        "title": str(payload.get("title", "Practice Assessment")).strip() or "Practice Assessment",
+        "type": assessment_type,
+        "questions": normalized,
+    }

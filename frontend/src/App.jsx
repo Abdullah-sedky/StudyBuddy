@@ -153,6 +153,10 @@ export default function App() {
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [dragOver, setDragOver]           = useState(false);
   const [zoomedDiagramSvg, setZoomedDiagramSvg] = useState("");
+  const [assessment, setAssessment] = useState(null);
+  const [selectedAnswers, setSelectedAnswers] = useState({});
+  const [assessmentLoading, setAssessmentLoading] = useState(false);
+  const [assessmentSubmitted, setAssessmentSubmitted] = useState(false);
   const bottomRef    = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -258,12 +262,62 @@ export default function App() {
 
   const clearChat = async () => {
     setMessages([]);
+    setAssessment(null);
+    setSelectedAnswers({});
+    setAssessmentSubmitted(false);
     try {
       const res  = await fetch(`${API}/session`);
       const data = await res.json();
       setSessionId(data.session_id);
     } catch {}
   };
+
+  const generateAssessment = async (kind) => {
+    if (assessmentLoading) return;
+    setAssessmentLoading(true);
+    setAssessment(null);
+    setSelectedAnswers({});
+    setAssessmentSubmitted(false);
+    setMessages(prev => [...prev, {
+      role: "assistant",
+      content: kind === "exam"
+        ? "Generating a model exam from your uploaded material..."
+        : "Generating an MCQ quiz from your uploaded material..."
+    }]);
+
+    try {
+      const res = await fetch(`${API}/assessment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind,
+          session_id: sessionId || "default",
+          num_questions: kind === "exam" ? 10 : 8,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Could not generate assessment.");
+      }
+      setAssessment(data);
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `Your ${kind === "exam" ? "model exam" : "MCQ quiz"} is ready below. Select answers and submit when done.`
+      }]);
+    } catch (e) {
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `Assessment generation failed: ${e.message || "Unknown error"}`
+      }]);
+    }
+    setAssessmentLoading(false);
+  };
+
+  const score = assessment
+    ? assessment.questions.reduce((acc, q, idx) => (
+      selectedAnswers[idx] === q.correct_index ? acc + 1 : acc
+    ), 0)
+    : 0;
 
   return (
     <div className="flex h-screen bg-sand-100 font-sans text-sand-900 overflow-hidden">
@@ -282,6 +336,33 @@ export default function App() {
         <div className="mx-4 border-t border-sand-300" />
 
         {/* Upload zone */}
+        <div className="px-4 pt-4">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-sand-500 mb-2.5">
+            Practice mode
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => generateAssessment("mcq")}
+              disabled={assessmentLoading}
+              className="flex-1 text-xs font-medium text-sand-700 bg-sand-50 hover:bg-sand-100 border border-sand-300 rounded-lg py-2 transition-all duration-150 disabled:opacity-60"
+            >
+              MCQ Quiz
+            </button>
+            <button
+              onClick={() => generateAssessment("exam")}
+              disabled={assessmentLoading}
+              className="flex-1 text-xs font-medium text-sand-700 bg-sand-50 hover:bg-sand-100 border border-sand-300 rounded-lg py-2 transition-all duration-150 disabled:opacity-60"
+            >
+              Model Exam
+            </button>
+          </div>
+          {assessmentLoading && (
+            <p className="text-[10px] text-sand-400 mt-2">Preparing questions...</p>
+          )}
+        </div>
+
+        <div className="mx-4 mt-4 border-t border-sand-300" />
+
         <div className="px-4 pt-4">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-sand-500 mb-2.5">
             Upload document
@@ -399,6 +480,85 @@ export default function App() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-8 py-6 flex flex-col gap-4 min-h-0">
+          {assessment && (
+            <div className="bg-white border border-sand-200 rounded-2xl p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-sand-800">{assessment.title}</h3>
+                  <p className="text-xs text-sand-400 mt-0.5">
+                    {assessment.type === "exam" ? "Model Exam" : "MCQ Quiz"} · {assessment.questions.length} questions
+                  </p>
+                </div>
+                {assessmentSubmitted && (
+                  <div className="text-xs font-semibold text-sand-700 bg-sand-100 border border-sand-300 rounded-lg px-2.5 py-1">
+                    Score: {score}/{assessment.questions.length}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {assessment.questions.map((q, qi) => (
+                  <div key={qi} className="rounded-xl border border-sand-200 bg-sand-50 p-3">
+                    <p className="text-sm font-medium text-sand-800">
+                      {qi + 1}. {q.question}
+                    </p>
+                    <div className="mt-2 flex flex-col gap-2">
+                      {q.options.map((opt, oi) => {
+                        const selected = selectedAnswers[qi] === oi;
+                        const isCorrect = q.correct_index === oi;
+                        const reveal = assessmentSubmitted;
+                        const classes = reveal
+                          ? isCorrect
+                            ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                            : selected
+                              ? "border-red-300 bg-red-50 text-red-800"
+                              : "border-sand-200 bg-white text-sand-700"
+                          : selected
+                            ? "border-sand-500 bg-sand-100 text-sand-900"
+                            : "border-sand-200 bg-white text-sand-700 hover:bg-sand-50";
+                        return (
+                          <button
+                            key={oi}
+                            disabled={assessmentSubmitted}
+                            onClick={() => setSelectedAnswers(prev => ({ ...prev, [qi]: oi }))}
+                            className={`text-left rounded-lg border px-3 py-2 text-xs transition-all ${classes} disabled:cursor-default`}
+                          >
+                            <span className="font-semibold mr-1.5">{String.fromCharCode(65 + oi)}.</span>
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {assessmentSubmitted && (
+                      <p className="mt-2 text-xs text-sand-600">
+                        <span className="font-semibold">Explanation:</span> {q.explanation}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => setAssessmentSubmitted(true)}
+                  disabled={assessmentSubmitted || Object.keys(selectedAnswers).length < assessment.questions.length}
+                  className="text-xs font-medium text-sand-50 bg-sand-700 hover:bg-sand-800 border border-sand-700 rounded-lg px-3 py-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  Submit answers
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedAnswers({});
+                    setAssessmentSubmitted(false);
+                  }}
+                  className="text-xs font-medium text-sand-700 bg-sand-50 hover:bg-sand-100 border border-sand-300 rounded-lg px-3 py-2"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          )}
+
           {messages.length === 0 && (
             <div className="flex-1 flex flex-col items-center justify-center text-center pb-12">
               <p className="font-display text-lg text-sand-300 mb-1">No messages yet</p>
