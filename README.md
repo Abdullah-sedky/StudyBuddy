@@ -126,43 +126,6 @@ Open the app at `http://127.0.0.1:5173`.
 - No authentication / per-user isolation yet.
 - On free-tier hosting, storage may be ephemeral (uploaded files/index may reset after redeploy/restart).
 
-## Deployment (Railway + Vercel)
-
-### Backend (Railway)
-
-1. Create a Railway service from this repo.
-2. Ensure `railway.toml` is used.
-3. Add Railway variable:
-   - `GROQ_API_KEY=your_key_here`
-   - `CORS_ORIGINS=https://<frontend-domain>.vercel.app,http://localhost:5173,http://127.0.0.1:5173`
-4. Generate a public domain in Railway networking.
-
-### Frontend (Vercel)
-
-1. Import the same repo in Vercel.
-2. Set **Root Directory** to `frontend`.
-3. Add Vercel environment variable:
-   - `VITE_API_URL=https://studybuddy-production-1523.up.railway.app`
-4. Deploy.
-
-### CORS
-
-Set `CORS_ORIGINS` in Railway as a comma-separated list of allowed frontend origins.
-
-Example:
-
-```env
-CORS_ORIGINS=https://<frontend-domain>.vercel.app,http://localhost:5173,http://127.0.0.1:5173
-```
-
-## Roadmap Ideas
-
-- Add multimodal slide understanding (OCR + vision model).
-- Add user auth and per-user document spaces.
-- Incremental indexing (avoid full rebuild per upload).
-- Source citations with page/slide-level grounding in UI.
-- Better evals and regression tests for answer quality.
-
 ## License
 
 Add your preferred license (e.g., MIT) in a `LICENSE` file.
