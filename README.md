@@ -128,4 +128,4 @@ Open the app at `http://127.0.0.1:5173`.
 
 ## License
 
-Add your preferred license (e.g., MIT) in a `LICENSE` file.
+This project is licensed under the **MIT License**. You are free to use, modify, and distribute this software for personal or commercial purposes.
