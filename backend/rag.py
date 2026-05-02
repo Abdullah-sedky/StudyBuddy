@@ -49,8 +49,8 @@ system_prompt = """
     - mindmap            — for concept overviews and topic breakdowns
 
     Keep diagrams concise (under 20 nodes). You may combine a short text explanation with the diagram.
-    Always use valid Mermaid syntax — avoid special characters inside node labels.
-
+    Always use valid Mermaid syntax. Inside node labels, never use parentheses (), 
+    brackets [], or any special characters. Use plain text only inside node labels.
     Context: {context}
 """
 
