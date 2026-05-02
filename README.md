@@ -6,10 +6,12 @@ It combines a FastAPI backend, a React frontend, local vector search with Chroma
 
 ## Live Deployment
 
-- **Backend (Railway):** `https://<your-backend-domain>.up.railway.app`
-- **Frontend (Vercel):** `https://<your-frontend-domain>.vercel.app`
+- **Backend API (Railway):** `https://studybuddy-production-1523.up.railway.app`
+- **API Docs:** `https://studybuddy-production-1523.up.railway.app/docs`
+- **Frontend App (Vercel):** `https://<frontend-domain>.vercel.app`
 
-> Replace the placeholders above with your real deployed URLs.
+> For normal usage, open the frontend app URL.  
+> The Railway URL is the backend API endpoint used by the frontend.
 
 ## Features
 
@@ -67,7 +69,7 @@ For assessments:
 3. LLM returns structured multiple-choice questions.
 4. Frontend renders an interactive quiz interface (select, submit, score, explain).
 
-## Local Setup
+## Local Development (Optional)
 
 ### 1) Clone and enter project
 
@@ -132,6 +134,7 @@ Open the app at `http://127.0.0.1:5173`.
 2. Ensure `railway.toml` is used.
 3. Add Railway variable:
    - `GROQ_API_KEY=your_key_here`
+   - `CORS_ORIGINS=https://<frontend-domain>.vercel.app,http://localhost:5173,http://127.0.0.1:5173`
 4. Generate a public domain in Railway networking.
 
 ### Frontend (Vercel)
@@ -139,21 +142,17 @@ Open the app at `http://127.0.0.1:5173`.
 1. Import the same repo in Vercel.
 2. Set **Root Directory** to `frontend`.
 3. Add Vercel environment variable:
-   - `VITE_API_URL=https://<your-backend-domain>.up.railway.app`
+   - `VITE_API_URL=https://studybuddy-production-1523.up.railway.app`
 4. Deploy.
 
 ### CORS
 
-In `backend/main.py`, add your Vercel domain to `ALLOWED_ORIGINS`, then redeploy backend.
+Set `CORS_ORIGINS` in Railway as a comma-separated list of allowed frontend origins.
 
 Example:
 
-```python
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://<your-frontend-domain>.vercel.app",
-]
+```env
+CORS_ORIGINS=https://<frontend-domain>.vercel.app,http://localhost:5173,http://127.0.0.1:5173
 ```
 
 ## Roadmap Ideas

@@ -9,12 +9,24 @@ from rag import build_chain, create_study_brain, release_study_brain, generate_a
 
 app = FastAPI()
 
-ALLOWED_ORIGINS = [
+DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:5174",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
+    "https://study-buddy-five-gamma.vercel.app"
 ]
+
+
+def _allowed_origins_from_env() -> list[str]:
+    raw = os.getenv("CORS_ORIGINS", "").strip()
+    if not raw:
+        return DEFAULT_ALLOWED_ORIGINS
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    return origins or DEFAULT_ALLOWED_ORIGINS
+
+
+ALLOWED_ORIGINS = _allowed_origins_from_env()
 
 app.add_middleware(
     CORSMiddleware,
