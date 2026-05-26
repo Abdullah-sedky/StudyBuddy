@@ -13,3 +13,5 @@ python-dotenv
 langchain-classic
 pypdf
 python-pptx
+ragas
+datasets

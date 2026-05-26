@@ -17,7 +17,10 @@ from langchain_classic.chains.combine_documents import create_stuff_documents_ch
 from langchain_classic.chains import create_retrieval_chain
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
-
+from ragas import evaluate
+from ragas.metrics import faithfulness, answer_relevancy, context_precision
+from ragas.llms import LangchainLLMWrapper
+from datasets import Dataset
 load_dotenv()
 
 llm = ChatGroq(model_name="llama-3.3-70b-versatile")
@@ -54,22 +57,23 @@ system_prompt = """
     Context: {context}
 """
 
-prompt = ChatPromptTemplate.from_messages([
+#Conversation template
+prompt = ChatPromptTemplate.from_messages([  
     ("system", system_prompt),
     ("placeholder", "{chat_history}"),
     ("human", "{input}"),
 ])
 
+#Include metadata, so it knows source of info
 document_prompt = PromptTemplate(
     input_variables=["page_content", "source"],
     template="Source File: {source}\nContent: {page_content}"
 )
 
-# Memory
+#Memory
+store = {}  #Dictionary for every user session and its messages (Temporary)
 
-store = {}  # session_id -> ChatMessageHistory, lives in RAM
-
-def get_session_history(session_id: str) -> ChatMessageHistory:
+def get_session_history(session_id: str) -> ChatMessageHistory:     #User session isolation, but it's temporary and wiped on refresh
     if session_id not in store:
         store[session_id] = ChatMessageHistory()
     return store[session_id]
@@ -299,12 +303,12 @@ def create_study_brain(data_path="./data", persist_dir="./chroma_db"):
 
     return current_vectorstore.as_retriever(search_kwargs={"k": 8})
 
-# ---------- Chain Builder ----------
+# Chain Builder
 
 def build_chain(retriever):
     """
     Builds a fresh conversational RAG chain around the given retriever.
-    Call this once at startup, and again every time a new file is uploaded.
+    It's called on every file upload.
     """
     document_chain = create_stuff_documents_chain(llm, prompt, document_prompt=document_prompt)
     rag_chain = create_retrieval_chain(retriever, document_chain)
@@ -316,6 +320,84 @@ def build_chain(retriever):
         history_messages_key="chat_history",
     )
 
+
+
+# Evaluation
+
+EVAL_LOG = "./eval_log.jsonl"   # one JSON object per line, appended after every response
+ 
+ 
+def evaluate_response(question: str, answer: str, contexts: list[str]) -> dict:
+   
+    dataset = Dataset.from_dict({
+        "question":  [question],
+        "answer":    [answer],
+        "contexts":  [contexts],    # list of lists, one inner list per question
+    })
+ 
+    judge_llm = LangchainLLMWrapper(llm)   # reusing groq as the judge, obviously I'd rather use another llm but costs yk
+ 
+    results = evaluate(
+        dataset=dataset,
+        metrics=[faithfulness, answer_relevancy, context_precision],
+        llm=judge_llm,
+    )
+ 
+    return {
+        "faithfulness":      round(float(results["faithfulness"]),      3),
+        "answer_relevancy":  round(float(results["answer_relevancy"]),  3),
+        "context_precision": round(float(results["context_precision"]), 3),
+    }
+ 
+ 
+def _run_and_log_eval(question: str, answer: str, contexts: list[str]) -> None:
+    """
+    Runs evals and appends the result to eval_log.jsonl.
+    Designed to run in a background thread so it doesn't affect the main app.
+    """
+    try:
+        scores = evaluate_response(question, answer, contexts)
+        entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "question":  question,
+            "answer":    answer,
+            "scores":    scores,
+        }
+        with open(EVAL_LOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        print(f"[EVAL] {scores}")   # visible in server logs
+    except Exception as e:
+        print(f"[EVAL ERROR] {e}") 
+ 
+ 
+def invoke_chain(chain, user_input: str, session_id: str) -> str:
+    """
+    Replace calling chain.invoke() directly.
+    Returns the answer string and fires off evals in the background.
+    """
+    result = chain.invoke(
+        {"input": user_input},
+        config={"configurable": {"session_id": session_id}},
+    )
+ 
+    answer = result["answer"]
+ 
+    # result["context"] is the list of Document objects retrieved by Chroma
+    # we extract just the text content for RAGAS
+    contexts = [doc.page_content for doc in result.get("context", [])]
+ 
+    # fire evals in a background thread so the user gets their answer immediately
+    # daemon=True means the thread won't block the app from shutting down
+    threading.Thread(
+        target=_run_and_log_eval,
+        args=(user_input, answer, contexts),
+        daemon=True,
+    ).start()
+ 
+    return answer
+
+
+# Creating assesments 
 
 def _context_from_docs(docs: list[Document], max_chars: int = 12000) -> str:
     chunks: list[str] = []
@@ -354,7 +436,7 @@ def generate_assessment(
     if not context:
         raise ValueError("No indexed context available to generate assessment.")
 
-    prompt = f"""
+    assessment_prompt = f"""
 You are generating an interactive {kind} for a university student.
 Use ONLY the provided context.
 
@@ -385,7 +467,7 @@ Context:
 {context}
 """
 
-    response = llm.invoke(prompt)
+    response = llm.invoke(assessment_prompt)
     content = (getattr(response, "content", "") or "").strip()
     try:
         payload = json.loads(content)

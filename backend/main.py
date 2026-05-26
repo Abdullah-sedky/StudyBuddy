@@ -5,8 +5,7 @@ import shutil
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from rag import build_chain, create_study_brain, release_study_brain, generate_assessment
-
+from rag import build_chain, create_study_brain, release_study_brain, generate_assessment, invoke_chain 
 app = FastAPI()
 
 DEFAULT_ALLOWED_ORIGINS = [
@@ -142,14 +141,10 @@ async def ask(request: AskRequest):
             detail="No documents uploaded yet. Please upload a file first."
         )
     try:
-        response = await chain.ainvoke(
-            {"input": request.question},
-            config={"configurable": {"session_id": request.session_id}}
-        )
-        return AskResponse(answer=response["answer"], session_id=request.session_id)
+        answer = invoke_chain(chain, request.question, request.session_id)
+        return AskResponse(answer=answer, session_id=request.session_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
