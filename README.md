@@ -1,3 +1,12 @@
+---
+title: StudyBuddy
+emoji: 📚
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+---
+
 # StudyBuddy
 
 StudyBuddy is a document-based study assistant that lets you upload course files (`.pdf`, `.pptx`), chat with your material using Retrieval-Augmented Generation (RAG), and generate interactive practice assessments.
