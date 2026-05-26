@@ -13,5 +13,5 @@ python-dotenv
 langchain-classic
 pypdf
 python-pptx
-ragas
+ragas==0.1.21
 datasets
