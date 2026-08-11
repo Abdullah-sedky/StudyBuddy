@@ -70,47 +70,6 @@ For assessments:
 3. LLM returns structured multiple-choice questions.
 4. Frontend renders an interactive quiz interface (select, submit, score, explain).
 
-## Local Development (Optional)
-
-### 1) Clone and enter project
-
-```bash
-git clone <your-repo-url>
-cd StudyBuddy
-```
-
-### 2) Backend setup
-
-```bash
-cd backend
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-Create `backend/.env`:
-
-```env
-GROQ_API_KEY=your_groq_api_key_here
-```
-
-Run backend:
-
-```bash
-uvicorn main:app --reload --host 127.0.0.1 --port 8000
-```
-
-### 3) Frontend setup
-
-In a second terminal:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open the app at `http://127.0.0.1:5173`.
 
 ## API Endpoints
 
